@@ -168,6 +168,12 @@
   .legend{display:flex;flex-wrap:wrap;gap:12px}
   .legend span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
   .legend .dot{width:10px;height:10px;border-radius:50%;box-shadow:0 0 9px 0 currentColor}
+  .leglbl{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);align-self:center;margin-right:2px}
+  .legchip{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:5px 11px;cursor:pointer;transition:border-color .15s,color .15s,opacity .15s;font-family:inherit}
+  .legchip:hover{border-color:var(--border-strong);color:var(--fg)}
+  .legchip.off{opacity:.42;text-decoration:line-through}
+  .legchip .dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 8px 0 currentColor}
+  .legchip.off .dot{box-shadow:none}
   .mapwrap{position:relative;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:radial-gradient(120% 120% at 50% 0%,rgba(40,60,120,.35),transparent 70%);box-shadow:var(--shadow)}
   #graph3d{width:100%;height:min(74vh,680px);position:relative;cursor:grab}
   #graph3d:active{cursor:grabbing}
@@ -415,14 +421,28 @@
   /* ---------- MAPPA 3D (WebGL · bloom + particelle + focus vicinato) ---------- */
   var mapInit=false, Graph=null, THREE=null, CATHEX={}, bloomPass=null, selNode=null, nbrIds=null;
   var reduceMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var activeCats=new Set(CATS);
   function computeCatHex(){ var probe=document.createElement('span'); document.body.appendChild(probe);
     CATS.forEach(function(c){ probe.style.color='var(--c-'+c+')'; CATHEX[c]=getComputedStyle(probe).color; }); probe.remove(); }
   function nid(x){ return (x&&typeof x==='object')?x.id:x; }
   function buildGraphData(){
-    var nodes=KB.nodes.map(function(n){return {id:n.id,l:n.l,cat:n.cat,deg:n.deg||1};});
+    var nodes=KB.nodes.filter(function(n){return activeCats.has(n.cat);}).map(function(n){return {id:n.id,l:n.l,cat:n.cat,deg:n.deg||1};});
+    var vis={}; nodes.forEach(function(n){vis[n.id]=1;});
     var seen={},links=[];
-    KB.nodes.forEach(function(n){ (n.conns||[]).forEach(function(c){ if(!byId[c.id])return; var k=n.id<c.id?n.id+'|'+c.id:c.id+'|'+n.id; if(seen[k])return; seen[k]=1; links.push({source:n.id,target:c.id}); }); });
+    KB.nodes.forEach(function(n){ if(!vis[n.id])return; (n.conns||[]).forEach(function(c){ if(!vis[c.id])return; var k=n.id<c.id?n.id+'|'+c.id:c.id+'|'+n.id; if(seen[k])return; seen[k]=1; links.push({source:n.id,target:c.id}); }); });
     return {nodes:nodes,links:links};
+  }
+  function renderLegend(){
+    el('legend').innerHTML='<span class="leglbl">Filtra</span>'+CATS.map(function(c){
+      var off=!activeCats.has(c);
+      return '<button class="legchip'+(off?' off':'')+'" data-mapcat="'+c+'" aria-pressed="'+(!off)+'"><span class="dot" style="background:var(--c-'+c+');color:var(--c-'+c+')"></span>'+esc(CATLBL[c]||c)+'</button>';
+    }).join('');
+  }
+  function applyFilter(){
+    if(!Graph) return;
+    selNode=null; nbrIds=null;
+    Graph.graphData(buildGraphData()); applyStyles();
+    setTimeout(function(){ if(Graph) try{Graph.zoomToFit(500,50);}catch(e){} },400);
   }
   function incident(l){ return selNode && (nid(l.source)===selNode || nid(l.target)===selNode); }
   function applyStyles(){
@@ -459,7 +479,7 @@
   async function initMap(){
     var elc=el('graph3d');
     computeCatHex();
-    el('legend').innerHTML=CATS.map(function(c){return '<span><span class="dot" style="background:var(--c-'+c+');color:var(--c-'+c+')"></span>'+esc(CATLBL[c]||c)+'</span>';}).join('');
+    renderLegend();
     elc.innerHTML='<div class="maperr">Carico il motore 3D…</div>'; mapInit=true;
     try{
       var mod=await import('3d-force-graph'); var FG=mod.default||mod;
@@ -492,6 +512,7 @@
   document.addEventListener('click',function(e){
     var t=e.target.closest('[data-id]'); if(t){ openNode(t.dataset.id); return; }
     if(e.target.closest('[data-godocs]')){ closeDrawer(); location.hash='#docs'; return; }
+    var lc=e.target.closest('[data-mapcat]'); if(lc){ var mc=lc.dataset.mapcat; if(activeCats.has(mc))activeCats.delete(mc); else activeCats.add(mc); renderLegend(); applyFilter(); return; }
     var cc=e.target.closest('[data-cat]'); if(cc){ fCat=cc.dataset.cat||null; if(cc.closest('#cats')){location.hash='#explore';} else {renderFilters(); renderResults(true);} return; }
     var th=e.target.closest('[data-theme]'); if(th){ fTheme=th.dataset.theme||null; if(th.closest('#themes')){location.hash='#explore';} else {renderFilters(); renderResults(true);} return; }
     var dc=e.target.closest('[data-doc]'); if(dc){ dc.classList.toggle('open'); return; }
